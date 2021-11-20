@@ -689,3 +689,19 @@ GetModuleInstance(ITSSModule **out, ITSSStorageProvider *provider, IStream *conf
 	*out            = new FFMPEGWaveDecoderModule();
 	return S_OK;
 }
+
+// Stub for bcrypt, to lower system requirement
+extern "C" NTSTATUS BCryptOpenAlgorithmProvider(BCRYPT_ALG_HANDLE *phAlgorithm, LPCWSTR pszAlgId, LPCWSTR pszImplementation, ULONG dwFlags)
+{
+	return STATUS_INVALID_PARAMETER;
+}
+
+extern "C" NTSTATUS BCryptGenRandom(BCRYPT_ALG_HANDLE hAlgorithm, PUCHAR pbBuffer, ULONG cbBuffer, ULONG dwFlags)
+{
+	return STATUS_INVALID_PARAMETER;
+}
+
+extern "C" NTSTATUS BCryptCloseAlgorithmProvider(BCRYPT_ALG_HANDLE hAlgorithm, ULONG dwFlags)
+{
+	return STATUS_INVALID_PARAMETER;
+}
