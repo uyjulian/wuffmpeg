@@ -2,3 +2,6 @@
 	path = external/ffmpeg
 	url = https://git.ffmpeg.org/ffmpeg.git
 	ignore = dirty
+[submodule "external/tp_stubz"]
+	path = external/tp_stubz
+	url = https://github.com/uyjulian/tp_stubz.git
