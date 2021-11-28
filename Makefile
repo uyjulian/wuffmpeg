@@ -29,8 +29,12 @@ include external/tp_stubz/Rules.lib.make
 
 DEPENDENCY_BUILD_DIRECTORY := build-$(TARGET_ARCH)
 DEPENDENCY_BUILD_DIRECTORY_FFMPEG := $(DEPENDENCY_BUILD_DIRECTORY)/ffmpeg
+
 FFMPEG_PATH := $(realpath external/ffmpeg)
-FFMPEG_LIBS := $(DEPENDENCY_BUILD_DIRECTORY_FFMPEG)/libavformat/libavformat.a $(DEPENDENCY_BUILD_DIRECTORY_FFMPEG)/libavcodec/libavcodec.a $(DEPENDENCY_BUILD_DIRECTORY_FFMPEG)/libswresample/libswresample.a $(DEPENDENCY_BUILD_DIRECTORY_FFMPEG)/libswscale/libswscale.a $(DEPENDENCY_BUILD_DIRECTORY_FFMPEG)/libavutil/libavutil.a
+
+DEPENDENCY_OUTPUT_DIRECTORY := $(shell realpath build-libraries)-$(TARGET_ARCH)
+
+FFMPEG_LIBS := $(DEPENDENCY_OUTPUT_DIRECTORY)/lib/libavformat.a $(DEPENDENCY_OUTPUT_DIRECTORY)/lib/libavcodec.a $(DEPENDENCY_OUTPUT_DIRECTORY)/lib/libswresample.a $(DEPENDENCY_OUTPUT_DIRECTORY)/lib/libswscale.a $(DEPENDENCY_OUTPUT_DIRECTORY)/lib/libavutil.a
 
 ifeq (xintel32,x$(TARGET_ARCH))
     FFMPEG_ARCH := x86
@@ -55,14 +59,18 @@ SOURCES += $(EXTLIBS)
 OBJECTS += $(EXTLIBS)
 LDLIBS += $(EXTLIBS)
 
-INCFLAGS += -I$(FFMPEG_PATH) -I$(DEPENDENCY_BUILD_DIRECTORY_FFMPEG)
+INCFLAGS += -I$(DEPENDENCY_OUTPUT_DIRECTORY)/include
 
 $(BASESOURCES): $(EXTLIBS)
 
-$(FFMPEG_LIBS):
+$(DEPENDENCY_OUTPUT_DIRECTORY):
+	mkdir -p $(DEPENDENCY_OUTPUT_DIRECTORY)
+
+$(FFMPEG_LIBS): $(DEPENDENCY_OUTPUT_DIRECTORY)
 	mkdir -p $(DEPENDENCY_BUILD_DIRECTORY_FFMPEG) && \
 	cd $(DEPENDENCY_BUILD_DIRECTORY_FFMPEG) && \
 	$(FFMPEG_PATH)/configure \
+		--prefix="$(DEPENDENCY_OUTPUT_DIRECTORY)" \
 		--enable-optimizations \
 		--disable-avdevice \
 		--disable-cuda \
@@ -92,7 +100,8 @@ $(FFMPEG_LIBS):
 		--cross-prefix=$(TOOL_TRIPLET_PREFIX) \
 		--target-os=mingw64 \
 	&& \
-	$(MAKE)
+	$(MAKE) && \
+	$(MAKE) install
 
 clean::
-	rm -rf $(DEPENDENCY_BUILD_DIRECTORY)
+	rm -rf $(DEPENDENCY_BUILD_DIRECTORY) $(DEPENDENCY_OUTPUT_DIRECTORY)
