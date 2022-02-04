@@ -32,7 +32,7 @@ DEPENDENCY_SOURCE_DIRECTORY_FFMPEG := $(DEPENDENCY_SOURCE_DIRECTORY)/ffmpeg
 
 DEPENDENCY_SOURCE_FILE_FFMPEG := $(DEPENDENCY_SOURCE_DIRECTORY)/ffmpeg.tar.xz
 
-DEPENDENCY_SOURCE_URL_FFMPEG := https://ffmpeg.org/releases/ffmpeg-4.4.1.tar.xz
+DEPENDENCY_SOURCE_URL_FFMPEG := https://ffmpeg.org/releases/ffmpeg-5.0.tar.xz
 
 $(DEPENDENCY_SOURCE_DIRECTORY):
 	mkdir -p $@
