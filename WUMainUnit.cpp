@@ -45,7 +45,7 @@ class FFMPEGWaveDecoder : public ITSSWaveDecoder
 	int            StreamIdx;
 	int            audio_buf_index;
 	int            audio_buf_samples;
-	uint64_t       audio_frame_next_pts;
+	int64_t        audio_frame_next_pts;
 	uint64_t       stream_start_time;
 	TSSWaveFormat  TSSFormat;
 	AVSampleFormat AVFmt;
@@ -55,6 +55,7 @@ class FFMPEGWaveDecoder : public ITSSWaveDecoder
 	AVPacket         Packet;
 	IStream *        InputStream;
 	AVFormatContext *FormatCtx;
+	AVCodecContext  *CodecCtx;
 	AVFrame *        frame;
 
 
@@ -68,10 +69,13 @@ public:
 		: RefCount(1)
 		, InputStream(nullptr)
 		, FormatCtx(nullptr)
+		, CodecCtx(nullptr)
 		, frame(nullptr)
 	{
 		av_log_set_level(AV_LOG_QUIET);
+#if 0
 		av_register_all();
+#endif
 		memset(&Packet, 0, sizeof(Packet));
 		memset(&TSSFormat, 0, sizeof(TSSFormat));
 	}
@@ -269,7 +273,11 @@ HRESULT FFMPEGWaveDecoder::SetPosition(unsigned __int64 samplepos)
 	{
 		if (Packet.data)
 		{
+#if 0
 			av_free_packet(&Packet);
+#else
+			av_packet_unref(&Packet);
+#endif
 		}
 		if (!ReadPacket())
 		{
@@ -298,7 +306,11 @@ HRESULT FFMPEGWaveDecoder::SetPosition(unsigned __int64 samplepos)
 		}
 		if (Packet.data)
 		{
+#if 0
 			av_free_packet(&Packet);
+#else
+			av_packet_unref(&Packet);
+#endif
 		}
 		if (!ReadPacket())
 		{
@@ -317,8 +329,8 @@ HRESULT FFMPEGWaveDecoder::SetPosition(unsigned __int64 samplepos)
 			{
 				return E_FAIL;
 			}
-		} while (samplepos > audio_frame_next_pts);
-		audio_buf_index = (samplepos - frame->pts);
+		} while ((int64_t)samplepos > audio_frame_next_pts);
+		audio_buf_index = ((int64_t)samplepos - frame->pts);
 		if (audio_buf_index < 0)
 		{
 			audio_buf_index = 0;
@@ -339,12 +351,18 @@ void FFMPEGWaveDecoder::Clear()
 		av_frame_free(&frame);
 		frame = nullptr;
 	}
+	if (CodecCtx)
+	{
+		avcodec_free_context(&CodecCtx);
+	}
 	if (FormatCtx)
 	{
+#if 0
 		for (unsigned int i = 0; i < FormatCtx->nb_streams; ++i)
 		{
 			avcodec_close(FormatCtx->streams[i]->codec);
 		}
+#endif
 		av_free(FormatCtx->pb->buffer);
 		av_free(FormatCtx->pb);
 		avformat_close_input(&FormatCtx);
@@ -369,10 +387,15 @@ HRESULT FFMPEGWaveDecoder::Open(wchar_t *url)
 	int          bufSize = 32 * 1024;
 	AVIOContext *pIOCtx  = avio_alloc_context((unsigned char *)av_malloc(bufSize + AVPROBE_PADDING_SIZE), bufSize, 0, InputStream, AVReadFunc, 0, AVSeekFunc);
 
-	AVInputFormat *fmt = nullptr;
+	const AVInputFormat *fmt = nullptr;
 	char           holder[512];
 	wcstombs(holder, url, sizeof(holder));
 	av_probe_input_buffer2(pIOCtx, &fmt, holder, nullptr, 0, 0);
+	AVCodecContext *avctx = CodecCtx = avcodec_alloc_context3(nullptr);
+	if (avctx == nullptr)
+	{
+		return E_FAIL;
+	}
 	AVFormatContext *ic = FormatCtx = avformat_alloc_context();
 	ic->pb                          = pIOCtx;
 	if (avformat_open_input(&ic, "", fmt, nullptr) < 0)
@@ -390,21 +413,15 @@ HRESULT FFMPEGWaveDecoder::Open(wchar_t *url)
 		ic->pb->eof_reached = 0;
 	}
 
-	StreamIdx = av_find_best_stream(ic, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+	const AVCodec* codec;
+	StreamIdx = av_find_best_stream(ic, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
 
-	if (StreamIdx < 0)
+	if (StreamIdx < 0 || StreamIdx == AVERROR_STREAM_NOT_FOUND)
 	{
 		return E_FAIL;
 	}
 
-	AVCodecContext *avctx = ic->streams[StreamIdx]->codec;
-	if (avctx->codec_type != AVMEDIA_TYPE_AUDIO)
-	{
-		return E_FAIL;
-	}
-
-	AVCodec *codec = avcodec_find_decoder(avctx->codec_id);
-	if (!codec)
+	if (avcodec_parameters_to_context(avctx, ic->streams[StreamIdx]->codecpar) < 0)
 	{
 		return E_FAIL;
 	}
@@ -463,8 +480,10 @@ HRESULT FFMPEGWaveDecoder::Open(wchar_t *url)
 
 int FFMPEGWaveDecoder::audio_decode_frame()
 {
+#if 0
 	AVStream *      audio_st = AudioStream;
-	AVCodecContext *dec      = audio_st->codec;
+#endif
+	AVCodecContext *dec      = CodecCtx;
 	for (;;)
 	{
 		while (pkt_temp.stream_index != -1)
@@ -479,7 +498,33 @@ int FFMPEGWaveDecoder::audio_decode_frame()
 			}
 
 			int got_frame;
+#if 0
 			int len1 = avcodec_decode_audio4(dec, frame, &got_frame, &pkt_temp);
+#else
+			//  SUGGESTION
+			//  Now that avcodec_decode_audio4 is deprecated and replaced
+			//  by 2 calls (receive frame and send packet), this could be optimized
+			//  into separate routines or separate threads.
+			//  Also now that it always consumes a whole buffer some code
+			//  in the caller may be able to be optimized.
+			int len1 = avcodec_receive_frame(dec, frame);
+			if (len1 == 0)
+			{
+				got_frame = 1;
+			}
+			if (len1 == AVERROR(EAGAIN))
+			{
+				len1 = 0;
+			}
+			if (len1 == 0)
+			{
+				len1 = avcodec_send_packet(dec, &pkt_temp);
+			}
+			if (len1 == AVERROR(EAGAIN))
+			{
+			    len1 = 0;
+			}
+#endif
 			if (len1 < 0)
 			{
 				pkt_temp.size = 0;
@@ -504,10 +549,12 @@ int FFMPEGWaveDecoder::audio_decode_frame()
 			{
 				frame->pts = av_rescale_q(frame->pts, dec->time_base, tb);
 			}
+#if 0
 			else if (frame->pkt_pts != AV_NOPTS_VALUE)
 			{
 				frame->pts = av_rescale_q(frame->pkt_pts, audio_st->time_base, tb);
 			}
+#endif
 			else if (audio_frame_next_pts != AV_NOPTS_VALUE)
 			{
 				AVRational a = {1, (int)TSSFormat.dwSamplesPerSec};
@@ -522,7 +569,11 @@ int FFMPEGWaveDecoder::audio_decode_frame()
 
 		if (Packet.data)
 		{
+#if 0
 			av_free_packet(&Packet);
+#else
+			av_packet_unref(&Packet);
+#endif
 		}
 
 		pkt_temp.stream_index = -1;
@@ -551,7 +602,11 @@ bool FFMPEGWaveDecoder::ReadPacket()
 			stream_start_time = AudioStream->start_time;
 			return true;
 		}
+#if 0
 		av_free_packet(&Packet);
+#else
+		av_packet_unref(&Packet);
+#endif
 	}
 	return false;
 }
