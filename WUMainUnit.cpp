@@ -354,6 +354,7 @@ void FFMPEGWaveDecoder::Clear()
 	if (CodecCtx)
 	{
 		avcodec_free_context(&CodecCtx);
+		CodecCtx = nullptr;
 	}
 	if (FormatCtx)
 	{
@@ -391,11 +392,6 @@ HRESULT FFMPEGWaveDecoder::Open(wchar_t *url)
 	char           holder[512];
 	wcstombs(holder, url, sizeof(holder));
 	av_probe_input_buffer2(pIOCtx, &fmt, holder, nullptr, 0, 0);
-	AVCodecContext *avctx = CodecCtx = avcodec_alloc_context3(nullptr);
-	if (avctx == nullptr)
-	{
-		return E_FAIL;
-	}
 	AVFormatContext *ic = FormatCtx = avformat_alloc_context();
 	ic->pb                          = pIOCtx;
 	if (avformat_open_input(&ic, "", fmt, nullptr) < 0)
@@ -421,16 +417,23 @@ HRESULT FFMPEGWaveDecoder::Open(wchar_t *url)
 		return E_FAIL;
 	}
 
-	if (avcodec_parameters_to_context(avctx, ic->streams[StreamIdx]->codecpar) < 0)
+	AVCodecContext *avctx = CodecCtx = avcodec_alloc_context3(codec);
+	if (avctx == nullptr)
 	{
 		return E_FAIL;
 	}
 
-	avctx->codec_id          = codec->id;
+	AVStream *stream = FormatCtx->streams[StreamIdx];
+
+	if (avcodec_parameters_to_context(avctx, stream->codecpar) < 0)
+	{
+		return E_FAIL;
+	}
+
 	avctx->workaround_bugs   = 1;
 	avctx->error_concealment = 3;
 
-	if (avcodec_open2(avctx, codec, nullptr) < 0)
+	if (avcodec_open2(avctx, avcodec_find_decoder(avctx->codec_id), nullptr) < 0)
 	{
 		return E_FAIL;
 	}
@@ -466,7 +469,7 @@ HRESULT FFMPEGWaveDecoder::Open(wchar_t *url)
 	{
 		IsPlanar = true;
 	}
-	AudioStream                = FormatCtx->streams[StreamIdx];
+	AudioStream                = stream;
 	TSSFormat.dwTotalTime      = av_q2d(AudioStream->time_base) * AudioStream->duration * 1000;
 	TSSFormat.ui64TotalSamples = av_q2d(AudioStream->time_base) * AudioStream->duration * TSSFormat.dwSamplesPerSec;
 
@@ -507,15 +510,7 @@ int FFMPEGWaveDecoder::audio_decode_frame()
 			//  into separate routines or separate threads.
 			//  Also now that it always consumes a whole buffer some code
 			//  in the caller may be able to be optimized.
-			int len1 = avcodec_receive_frame(dec, frame);
-			if (len1 == 0)
-			{
-				got_frame = 1;
-			}
-			if (len1 == AVERROR(EAGAIN))
-			{
-				len1 = 0;
-			}
+			int len1 = 0;
 			if (len1 == 0)
 			{
 				len1 = avcodec_send_packet(dec, &pkt_temp);
@@ -523,6 +518,16 @@ int FFMPEGWaveDecoder::audio_decode_frame()
 			if (len1 == AVERROR(EAGAIN))
 			{
 			    len1 = 0;
+			}
+			len1 = avcodec_receive_frame(dec, frame);
+			got_frame = (len1 == 0) ? 1 : 0;
+			if (len1 == AVERROR(EAGAIN))
+			{
+				len1 = 0;
+			}
+			if (len1 == 0)
+			{
+				len1 = pkt_temp.size;
 			}
 #endif
 			if (len1 < 0)
