@@ -49,7 +49,6 @@ class FFMPEGWaveDecoder : public ITSSWaveDecoder
 	uint64_t       stream_start_time;
 	TSSWaveFormat  TSSFormat;
 	AVSampleFormat AVFmt;
-	AVPacket       pkt_temp;
 	AVStream *     AudioStream;
 
 	AVPacket         Packet;
@@ -271,14 +270,6 @@ HRESULT FFMPEGWaveDecoder::SetPosition(unsigned __int64 samplepos)
 	}
 	if (Packet.duration <= 0)
 	{
-		if (Packet.data)
-		{
-#if 0
-			av_free_packet(&Packet);
-#else
-			av_packet_unref(&Packet);
-#endif
-		}
 		if (!ReadPacket())
 		{
 			int ret = avformat_seek_file(FormatCtx, StreamIdx, 0, 0, 0, AVSEEK_FLAG_BACKWARD);
@@ -304,14 +295,6 @@ HRESULT FFMPEGWaveDecoder::SetPosition(unsigned __int64 samplepos)
 		{
 			return E_FAIL;
 		}
-		if (Packet.data)
-		{
-#if 0
-			av_free_packet(&Packet);
-#else
-			av_packet_unref(&Packet);
-#endif
-		}
 		if (!ReadPacket())
 		{
 			return E_FAIL;
@@ -321,7 +304,6 @@ HRESULT FFMPEGWaveDecoder::SetPosition(unsigned __int64 samplepos)
 			seek_temp -= Packet.duration;
 			continue;
 		}
-		pkt_temp = Packet;
 		do
 		{
 			audio_buf_samples = audio_decode_frame();
@@ -342,10 +324,7 @@ HRESULT FFMPEGWaveDecoder::SetPosition(unsigned __int64 samplepos)
 
 void FFMPEGWaveDecoder::Clear()
 {
-	if (Packet.data)
-	{
-		av_packet_unref(&Packet);
-	}
+	av_packet_unref(&Packet);
 	if (frame)
 	{
 		av_frame_free(&frame);
@@ -476,7 +455,6 @@ HRESULT FFMPEGWaveDecoder::Open(wchar_t *url)
 	audio_buf_index       = 0;
 	audio_buf_samples     = 0;
 	audio_frame_next_pts  = 0;
-	pkt_temp.stream_index = -1;
 
 	return S_OK;
 }
@@ -487,65 +465,25 @@ int FFMPEGWaveDecoder::audio_decode_frame()
 	AVStream *      audio_st = AudioStream;
 #endif
 	AVCodecContext *dec      = CodecCtx;
+	if (!frame)
+	{
+		frame = av_frame_alloc();
+	}
 	for (;;)
 	{
-		while (pkt_temp.stream_index != -1)
+		for (;;)
 		{
-			if (!frame)
-			{
-				frame = av_frame_alloc();
-			}
-			else
-			{
-				av_frame_unref(frame);
-			}
+			av_frame_unref(frame);
 
-			int got_frame;
-#if 0
-			int len1 = avcodec_decode_audio4(dec, frame, &got_frame, &pkt_temp);
-#else
-			//  SUGGESTION
-			//  Now that avcodec_decode_audio4 is deprecated and replaced
-			//  by 2 calls (receive frame and send packet), this could be optimized
-			//  into separate routines or separate threads.
-			//  Also now that it always consumes a whole buffer some code
-			//  in the caller may be able to be optimized.
-			int len1 = 0;
-			if (len1 == 0)
+			int frame_ret = avcodec_receive_frame(dec, frame);
+			if (frame_ret == AVERROR(EAGAIN))
 			{
-				len1 = avcodec_send_packet(dec, &pkt_temp);
-			}
-			if (len1 == AVERROR(EAGAIN))
-			{
-			    len1 = 0;
-			}
-			len1 = avcodec_receive_frame(dec, frame);
-			got_frame = (len1 == 0) ? 1 : 0;
-			if (len1 == AVERROR(EAGAIN))
-			{
-				len1 = 0;
-			}
-			if (len1 == 0)
-			{
-				len1 = pkt_temp.size;
-			}
-#endif
-			if (len1 < 0)
-			{
-				pkt_temp.size = 0;
 				break;
 			}
-			pkt_temp.dts = pkt_temp.pts = AV_NOPTS_VALUE;
-			pkt_temp.data += len1;
-			pkt_temp.size -= len1;
-			if ((pkt_temp.data && pkt_temp.size <= 0) || (!pkt_temp.data && !got_frame))
+			if (frame_ret < 0)
 			{
-				pkt_temp.stream_index = -1;
-			}
-
-			if (!got_frame)
-			{
-				continue;
+				// Error
+				return -1;
 			}
 
 			AVRational tb = {1, frame->sample_rate};
@@ -567,28 +505,23 @@ int FFMPEGWaveDecoder::audio_decode_frame()
 			}
 
 			if (frame->pts != AV_NOPTS_VALUE)
+			{
 				audio_frame_next_pts = frame->pts + frame->nb_samples;
+			}
 
 			return frame->nb_samples;
 		}
-
-		if (Packet.data)
-		{
-#if 0
-			av_free_packet(&Packet);
-#else
-			av_packet_unref(&Packet);
-#endif
-		}
-
-		pkt_temp.stream_index = -1;
 
 		if (!ReadPacket())
 		{
 			return -1;
 		}
 
-		pkt_temp = Packet;
+		int packet_result = avcodec_send_packet(dec, &Packet);
+		if (packet_result < 0)
+		{
+		    return -1;
+		}
 	}
 	return -1;
 }
@@ -597,6 +530,8 @@ bool FFMPEGWaveDecoder::ReadPacket()
 {
 	for (;;)
 	{
+		av_packet_unref(&Packet);
+
 		int ret = av_read_frame(FormatCtx, &Packet);
 		if (ret < 0)
 		{
@@ -607,11 +542,6 @@ bool FFMPEGWaveDecoder::ReadPacket()
 			stream_start_time = AudioStream->start_time;
 			return true;
 		}
-#if 0
-		av_free_packet(&Packet);
-#else
-		av_packet_unref(&Packet);
-#endif
 	}
 	return false;
 }
