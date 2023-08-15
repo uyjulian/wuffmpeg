@@ -19,6 +19,7 @@
 #endif
 #include <windows.h>
 #include <objidl.h>
+#include <bcrypt.h>
 #include "tvpsnd.h"
 
 #define EXPORT(hr) extern "C" __declspec(dllexport) hr __stdcall
