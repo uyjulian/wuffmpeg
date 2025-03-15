@@ -49,6 +49,7 @@ endif()
 
 ExternalProject_Add(ffmpeg-build
     URL https://ffmpeg.org/releases/ffmpeg-5.0.tar.xz
+    URL_HASH SHA256=51e919f7d205062c0fd4fae6243a84850391115104ccf1efc451733bc0ac7298
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     CONFIGURE_COMMAND
 		<SOURCE_DIR>/configure
