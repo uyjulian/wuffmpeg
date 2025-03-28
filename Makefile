@@ -20,8 +20,8 @@ PROJECT_BASENAME = wuffmpeg
 
 USE_TVPSND = 1
 
-RC_FILEDESCRIPTION ?= ffmpeg decoder for TVP Sound System
-RC_LEGALCOPYRIGHT ?= Copyright (C) 2020-2021 Julian Uy; This product is licensed under the GNU Lesser General Public License version 2.1 or (at your option) any later version.
+RC_DESC ?= ffmpeg decoder for TVP Sound System
 RC_PRODUCTNAME ?= ffmpeg decoder for TVP Sound System
+RC_LEGALCOPYRIGHT ?= Copyright (C) 2020-2021 Julian Uy; This product is licensed under the GNU Lesser General Public License version 2.1 or (at your option) any later version.
 
 include external/tp_stubz/Rules.lib.make
